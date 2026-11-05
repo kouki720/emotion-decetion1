@@ -7,32 +7,28 @@ from dotenv import load_dotenv
 # Racine du projet
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-# Charger les variables du fichier .env
+# Chargement des variables d'environnement
 load_dotenv(BASE_DIR / ".env")
 
-# Configuration Hugging Face
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-# Modèle utilisé pour l'analyse de sentiment
-HF_MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct"
+# Clé API Google Gemini
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 
 def validate_settings():
+    """Vérifie la configuration nécessaire au projet."""
 
-    if not HF_TOKEN:
+    if not GOOGLE_API_KEY:
         raise ValueError(
-            "HF_TOKEN est absent. Vérifiez votre fichier .env."
+            "GOOGLE_API_KEY est absente. "
+            "Vérifiez votre fichier .env."
         )
 
-    if not HF_TOKEN.startswith("hf_"):
-        raise ValueError(
-            "Le token Hugging Face semble invalide."
-        )
+    if len(GOOGLE_API_KEY.strip()) < 20:
+        raise ValueError("La clé API Google semble invalide.")
 
 
 if __name__ == "__main__":
     validate_settings()
 
     print("Configuration chargée avec succès.")
-    print(f"Modèle : {HF_MODEL_ID}")
-    print("Token Hugging Face : configuré (valeur masquée)")
+    print("Google Gemini API Key : configurée (valeur masquée)")
