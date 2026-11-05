@@ -1,109 +1,67 @@
 
 from functools import lru_cache
 
+from google import genai
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.config.settings import (
-    GOOGLE_API_KEY,
-    validate_settings,
-)
+from src.config.settings import GOOGLE_API_KEY, validate_settings
 
-
-FREE_GEMINI_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-]
-
-ACTIVE_MODEL_ID = None
 
 REQUEST_TIMEOUT = 45
 
+ACTIVE_MODEL_ID = None
+UNAVAILABLE_MODELS = set()
+
+
+def normalize_model_name(model_name: str) -> str:
+    return model_name.split("/")[-1]
+
+
+@lru_cache(maxsize=1)
+def get_available_models() -> tuple:
+
+    validate_settings()
+
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+
+    available_models = []
+
+    for model in client.models.list():
+
+        supported_actions = (
+            getattr(model, "supported_actions", None)
+            or getattr(model, "supported_generation_methods", None)
+            or []
+        )
+
+        if "generateContent" not in supported_actions:
+            continue
+
+        model_name = normalize_model_name(model.name)
+
+        if (
+            model_name.startswith("gemini-")
+            and model_name not in available_models
+        ):
+            available_models.append(model_name)
+
+    if not available_models:
+        raise RuntimeError(
+            "Aucun modèle Gemini compatible n'est accessible."
+        )
+
+    return tuple(available_models)
+
 
 def create_model(model_id: str):
-    """Construit une instance LangChain Gemini."""
 
     return ChatGoogleGenerativeAI(
         model=model_id,
         google_api_key=GOOGLE_API_KEY,
         temperature=0,
-        max_output_tokens=64,
+        max_output_tokens=512,
         timeout=REQUEST_TIMEOUT,
         max_retries=0,
-    )
-
-
-@lru_cache(maxsize=1)
-def get_llm():
-
-    global ACTIVE_MODEL_ID
-
-    validate_settings()
-
-    test_message = (
-        "Réponds brièvement : qu'est-ce que l'analyse de sentiment ?"
-    )
-
-    print("\nRecherche d'un modèle Gemini disponible...\n", flush=True)
-
-    for model_id in FREE_GEMINI_MODELS:
-
-        print(f"Test du modèle : {model_id}", flush=True)
-
-        try:
-            model = create_model(model_id)
-
-            response = model.invoke(test_message)
-
-            if not response.content:
-                print("  ECHEC : réponse vide.\n", flush=True)
-                continue
-
-            ACTIVE_MODEL_ID = model_id
-
-            print("  SUCCES : modèle disponible !", flush=True)
-            print(f"  Modèle sélectionné : {model_id}\n", flush=True)
-
-            return model
-
-        except Exception as error:
-
-            error_message = str(error)
-
-            print("  ECHEC : modèle indisponible.", flush=True)
-            print(
-                f"  Type : {type(error).__name__}",
-                flush=True
-            )
-            print(
-                f"  Détail : {error_message[:300]}\n",
-                flush=True
-            )
-
-            error_lower = error_message.lower()
-
-            if (
-                "api key not valid" in error_lower
-                or "invalid api key" in error_lower
-            ):
-                raise RuntimeError(
-                    "Clé API Gemini invalide. Vérifiez votre .env."
-                ) from error
-
-            if "permission_denied" in error_lower:
-                raise RuntimeError(
-                    "Accès refusé. Vérifiez les autorisations API."
-                ) from error
-
-            continue
-
-    raise RuntimeError(
-        "Aucun modèle Gemini testé n'a répondu. "
-        "Vérifiez les modèles, les quotas et les autorisations."
     )
 
 
@@ -111,30 +69,54 @@ def get_active_model_id():
     return ACTIVE_MODEL_ID
 
 
+def set_active_model_id(model_id: str):
+
+    global ACTIVE_MODEL_ID
+
+    ACTIVE_MODEL_ID = model_id
+
+
+def mark_model_unavailable(model_id: str):
+
+    UNAVAILABLE_MODELS.add(model_id)
+
+    global ACTIVE_MODEL_ID
+
+    if ACTIVE_MODEL_ID == model_id:
+        ACTIVE_MODEL_ID = None
+
+
+def get_candidate_models():
+
+    available_models = get_available_models()
+
+    candidates = []
+
+    # 1. Essayer d'abord le modèle qui a déjà fonctionné.
+    if ACTIVE_MODEL_ID and ACTIVE_MODEL_ID not in UNAVAILABLE_MODELS:
+        candidates.append(ACTIVE_MODEL_ID)
+
+    # 2. Ajouter les autres modèles non encore déclarés indisponibles.
+    for model_id in available_models:
+
+        if (
+            model_id not in UNAVAILABLE_MODELS
+            and model_id not in candidates
+        ):
+            candidates.append(model_id)
+
+    return candidates
+
+
 if __name__ == "__main__":
 
-    print("======================================", flush=True)
-    print("       GEMINI MODEL SELECTOR", flush=True)
-    print("======================================", flush=True)
-
     try:
-        llm = get_llm()
+        models = get_available_models()
 
-        print("\nTEST FINAL", flush=True)
+        print(f"Nombre de modèles accessibles : {len(models)}")
 
-        response = llm.invoke(
-            "Explique en deux phrases le fonctionnement "
-            "de l'analyse de sentiment."
-        )
-
-        print("\nRéponse de Gemini :", flush=True)
-        print(response.content, flush=True)
-
-        print(
-            f"\nModèle utilisé : {get_active_model_id()}",
-            flush=True
-        )
+        if ACTIVE_MODEL_ID:
+            print(f"Modèle actif : {ACTIVE_MODEL_ID}")
 
     except Exception as error:
-        print("\nERREUR :", flush=True)
-        print(error, flush=True)
+        print(f"Erreur : {type(error).__name__}: {error}")
