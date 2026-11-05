@@ -14,18 +14,19 @@ from src.schemas.sentiment_schema import SentimentResult
 
 from src.tools.language_detection import detect_language
 
+from src.validators.output_validator import (
+    validate_sentiment_result,
+)
+
 
 def analyze_with_fallback(text: str) -> SentimentResult:
 
     candidates = get_candidate_models()
-
     errors = []
 
     for model_id in candidates:
 
         try:
-
-            # Réutiliser le modèle déjà fonctionnel en priorité.
             llm = create_model(model_id)
 
             structured_llm = llm.with_structured_output(
@@ -44,7 +45,9 @@ def analyze_with_fallback(text: str) -> SentimentResult:
                     "Réponse incompatible avec SentimentResult."
                 )
 
-            # Mémoriser le modèle qui vient de réussir.
+            # Validation du résultat Gemini.
+            validate_sentiment_result(result)
+
             set_active_model_id(model_id)
 
             print("\n========== GEMINI MODEL SELECTION ==========")
@@ -94,6 +97,9 @@ def analyze_sentiment(text: str) -> SentimentResult:
         }
     )
 
+    # Validation finale après ajout de la langue.
+    validate_sentiment_result(final_result)
+
     return final_result
 
 
@@ -108,7 +114,6 @@ if __name__ == "__main__":
     print(f"\nTexte analysé : {test_text}")
 
     try:
-
         result = analyze_sentiment(test_text)
 
         print("\n========== FINAL RESULT ==========")
